@@ -32,6 +32,7 @@ factifyScript' :: Callable.ScriptContent -> [ Set Kbgen.Fact ]
 factifyScript' s = [
         getCallsRelatedFacts (Callable.scriptBody s),
         getConstStringsRelatedFacts (Callable.scriptBody s),
+        getConstIntegersRelatedFacts (Callable.scriptBody s),
         getAssignmentsRelatedFacts (Callable.scriptBody s)
     ]
 
@@ -43,7 +44,8 @@ factifyLambda' l = [
         getDataflowFacts (Callable.lambdaBody l),
         getCallsRelatedFacts (Callable.lambdaBody l),
         getParamsRelatedFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
-        getConstStringsRelatedFacts (Callable.lambdaBody l)
+        getConstStringsRelatedFacts (Callable.lambdaBody l),
+        getConstIntegersRelatedFacts (Callable.lambdaBody l)
     ]
 
 factifyFunc :: Callable.FunctionContent -> Set Kbgen.Fact
@@ -55,7 +57,8 @@ factifyFunc' f = [
         getDataflowFacts (Callable.funcBody f),
         getCallableRelatedFacts (Callable.funcName f) (Callable.funcLocation f),
         getParamsRelatedFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
-        getConstStringsRelatedFacts (Callable.funcBody f)
+        getConstStringsRelatedFacts (Callable.funcBody f),
+        getConstIntegersRelatedFacts (Callable.funcBody f)
     ]
 
 factifyMethod :: Callable.MethodContent -> Set Kbgen.Fact
@@ -67,7 +70,8 @@ factifyMethod' m = [
         getDataflowFacts (Callable.methodBody m),
         getCallsRelatedFacts (Callable.methodBody m),
         getParamsRelatedFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
-        getConstStringsRelatedFacts (Callable.methodBody m)
+        getConstStringsRelatedFacts (Callable.methodBody m),
+        getConstIntegersRelatedFacts (Callable.methodBody m)
     ]
 
 getCallableRelatedFacts :: Token.FuncName -> Location -> Set Kbgen.Fact
@@ -143,6 +147,73 @@ getConstStringsFromValue' value = let
     location = Kbgen.ConstStr (Token.constStrLocation value)
     constString = Kbgen.ConstString location value
     in Set.singleton (Kbgen.ConstStringCtor constString)
+
+getConstIntegersRelatedFacts :: Cfg -> Set Kbgen.Fact
+getConstIntegersRelatedFacts = getConstIntegersRelatedFacts' . instructions
+
+getConstIntegersRelatedFacts' :: Set Bitcode.Instruction -> Set Kbgen.Fact
+getConstIntegersRelatedFacts' = Foldable.foldl' getConstIntegersRelatedFacts'' Set.empty
+
+getConstIntegersRelatedFacts'' :: Set Kbgen.Fact -> Bitcode.Instruction -> Set Kbgen.Fact
+getConstIntegersRelatedFacts'' acc i = Set.union acc (getConstIntegersRelatedFacts''' i)
+
+getConstIntegersRelatedFacts''' :: Bitcode.Instruction -> Set Kbgen.Fact
+getConstIntegersRelatedFacts''' (Bitcode.Instruction _ i) = getConstIntegersRelatedFacts'''' i
+
+getConstIntegersRelatedFacts'''' :: Bitcode.InstructionContent -> Set Kbgen.Fact
+getConstIntegersRelatedFacts'''' (Bitcode.Call c) = getConstIntegersRelatedFactsFromCall c
+getConstIntegersRelatedFacts'''' (Bitcode.Unop u) = getConstIntegersRelatedFactsFromUnop u
+getConstIntegersRelatedFacts'''' (Bitcode.Binop b) = getConstIntegersRelatedFactsFromBinop b
+getConstIntegersRelatedFacts'''' (Bitcode.Return r) = getConstIntegersRelatedFactsFromReturn r
+getConstIntegersRelatedFacts'''' (Bitcode.Assign a) = getConstIntegersRelatedFactsFromAssign a
+getConstIntegersRelatedFacts'''' (Bitcode.FieldWrite f) = getConstIntegersRelatedFactsFromFieldWrite f
+getConstIntegersRelatedFacts'''' (Bitcode.SubscriptRead s) = getConstIntegersRelatedFactsFromSubscriptRead s
+getConstIntegersRelatedFacts'''' (Bitcode.SubscriptWrite s) = getConstIntegersRelatedFactsFromSubscriptWrite s
+getConstIntegersRelatedFacts'''' _ = Set.empty
+
+getConstIntegersRelatedFactsFromCall :: Bitcode.CallContent -> Set Kbgen.Fact
+getConstIntegersRelatedFactsFromCall = getConstIntegersFromValues . Bitcode.args
+
+getConstIntegersRelatedFactsFromUnop :: Bitcode.UnopContent -> Set Kbgen.Fact
+getConstIntegersRelatedFactsFromUnop = getConstIntegersFromValue . Bitcode.unopLhs
+
+getConstIntegersRelatedFactsFromBinop :: Bitcode.BinopContent -> Set Kbgen.Fact
+getConstIntegersRelatedFactsFromBinop b = let
+    lhs = getConstIntegersFromValue (Bitcode.binopLhs b)
+    rhs = getConstIntegersFromValue (Bitcode.binopRhs b)
+    in Set.union lhs rhs
+
+getConstIntegersRelatedFactsFromReturn :: Bitcode.ReturnContent -> Set Kbgen.Fact
+getConstIntegersRelatedFactsFromReturn (Bitcode.ReturnContent Nothing) = Set.empty
+getConstIntegersRelatedFactsFromReturn (Bitcode.ReturnContent (Just v)) = getConstIntegersFromValue v
+
+getConstIntegersRelatedFactsFromAssign :: Bitcode.AssignContent -> Set Kbgen.Fact
+getConstIntegersRelatedFactsFromAssign = getConstIntegersFromValue . Bitcode.assignInput
+
+getConstIntegersRelatedFactsFromFieldWrite :: Bitcode.FieldWriteContent -> Set Kbgen.Fact
+getConstIntegersRelatedFactsFromFieldWrite = getConstIntegersFromValue . Bitcode.fieldWriteInput
+
+getConstIntegersRelatedFactsFromSubscriptRead :: Bitcode.SubscriptReadContent -> Set Kbgen.Fact
+getConstIntegersRelatedFactsFromSubscriptRead = getConstIntegersFromValue . Bitcode.subscriptReadIdx
+
+getConstIntegersRelatedFactsFromSubscriptWrite :: Bitcode.SubscriptWriteContent -> Set Kbgen.Fact
+getConstIntegersRelatedFactsFromSubscriptWrite s = let
+    index = getConstIntegersFromValue (Bitcode.subscriptWriteIdx s)
+    value = getConstIntegersFromValue (Bitcode.subscriptWriteInput s)
+    in Set.union index value
+
+getConstIntegersFromValues :: [ Bitcode.Value ] -> Set Kbgen.Fact
+getConstIntegersFromValues = List.foldl' Set.union Set.empty . map getConstIntegersFromValue
+
+getConstIntegersFromValue :: Bitcode.Value -> Set Kbgen.Fact
+getConstIntegersFromValue (Bitcode.ConstValueCtor (Bitcode.ConstIntValue i)) = getConstIntegersFromValue' i
+getConstIntegersFromValue _ = Set.empty
+
+getConstIntegersFromValue' :: Token.ConstInt -> Set Kbgen.Fact
+getConstIntegersFromValue' value = let
+    location = Kbgen.ConstInt (Token.constIntLocation value)
+    constInt = Kbgen.ConstInteger location value
+    in Set.singleton (Kbgen.ConstIntegerCtor constInt)
 
 getAssignmentsRelatedFacts :: Cfg -> Set Kbgen.Fact
 getAssignmentsRelatedFacts = getAssignmentsRelatedFacts' . instructions

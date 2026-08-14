@@ -50,7 +50,7 @@ executable kbgen
         regex-tdfa,
         dhscanner-ast >= 1.1.5,
         dhscanner-bitcode >= 1.0.16,
-        dhscanner-kbgen >= 1.0.35,
+        dhscanner-kbgen >= 1.0.37,
         split,
         aeson,
         array,
