@@ -33,6 +33,8 @@ factifyScript' s = [
         getCallsRelatedFacts (Callable.scriptBody s),
         getConstStringsRelatedFacts (Callable.scriptBody s),
         getConstIntegersRelatedFacts (Callable.scriptBody s),
+        getConstNullsRelatedFacts (Callable.scriptBody s),
+        getGatedReturnFacts (Callable.scriptBody s),
         getAssignmentsRelatedFacts (Callable.scriptBody s)
     ]
 
@@ -45,7 +47,9 @@ factifyLambda' l = [
         getCallsRelatedFacts (Callable.lambdaBody l),
         getParamsRelatedFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
         getConstStringsRelatedFacts (Callable.lambdaBody l),
-        getConstIntegersRelatedFacts (Callable.lambdaBody l)
+        getConstIntegersRelatedFacts (Callable.lambdaBody l),
+        getConstNullsRelatedFacts (Callable.lambdaBody l),
+        getGatedReturnFacts (Callable.lambdaBody l)
     ]
 
 factifyFunc :: Callable.FunctionContent -> Set Kbgen.Fact
@@ -58,7 +62,9 @@ factifyFunc' f = [
         getCallableRelatedFacts (Callable.funcName f) (Callable.funcLocation f),
         getParamsRelatedFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
         getConstStringsRelatedFacts (Callable.funcBody f),
-        getConstIntegersRelatedFacts (Callable.funcBody f)
+        getConstIntegersRelatedFacts (Callable.funcBody f),
+        getConstNullsRelatedFacts (Callable.funcBody f),
+        getGatedReturnFacts (Callable.funcBody f)
     ]
 
 factifyMethod :: Callable.MethodContent -> Set Kbgen.Fact
@@ -71,7 +77,9 @@ factifyMethod' m = [
         getCallsRelatedFacts (Callable.methodBody m),
         getParamsRelatedFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
         getConstStringsRelatedFacts (Callable.methodBody m),
-        getConstIntegersRelatedFacts (Callable.methodBody m)
+        getConstIntegersRelatedFacts (Callable.methodBody m),
+        getConstNullsRelatedFacts (Callable.methodBody m),
+        getGatedReturnFacts (Callable.methodBody m)
     ]
 
 getCallableRelatedFacts :: Token.FuncName -> Location -> Set Kbgen.Fact
@@ -214,6 +222,263 @@ getConstIntegersFromValue' value = let
     location = Kbgen.ConstInt (Token.constIntLocation value)
     constInt = Kbgen.ConstInteger location value
     in Set.singleton (Kbgen.ConstIntegerCtor constInt)
+
+getConstNullsRelatedFacts :: Cfg -> Set Kbgen.Fact
+getConstNullsRelatedFacts = getConstNullsRelatedFacts' . instructions
+
+getConstNullsRelatedFacts' :: Set Bitcode.Instruction -> Set Kbgen.Fact
+getConstNullsRelatedFacts' = Foldable.foldl' getConstNullsRelatedFacts'' Set.empty
+
+getConstNullsRelatedFacts'' :: Set Kbgen.Fact -> Bitcode.Instruction -> Set Kbgen.Fact
+getConstNullsRelatedFacts'' acc i = Set.union acc (getConstNullsRelatedFacts''' i)
+
+getConstNullsRelatedFacts''' :: Bitcode.Instruction -> Set Kbgen.Fact
+getConstNullsRelatedFacts''' (Bitcode.Instruction _ i) = getConstNullsRelatedFacts'''' i
+
+getConstNullsRelatedFacts'''' :: Bitcode.InstructionContent -> Set Kbgen.Fact
+getConstNullsRelatedFacts'''' (Bitcode.Call c) = getConstNullsRelatedFactsFromCall c
+getConstNullsRelatedFacts'''' (Bitcode.Unop u) = getConstNullsRelatedFactsFromUnop u
+getConstNullsRelatedFacts'''' (Bitcode.Binop b) = getConstNullsRelatedFactsFromBinop b
+getConstNullsRelatedFacts'''' (Bitcode.Return r) = getConstNullsRelatedFactsFromReturn r
+getConstNullsRelatedFacts'''' (Bitcode.Assign a) = getConstNullsRelatedFactsFromAssign a
+getConstNullsRelatedFacts'''' (Bitcode.FieldWrite f) = getConstNullsRelatedFactsFromFieldWrite f
+getConstNullsRelatedFacts'''' (Bitcode.SubscriptRead s) = getConstNullsRelatedFactsFromSubscriptRead s
+getConstNullsRelatedFacts'''' (Bitcode.SubscriptWrite s) = getConstNullsRelatedFactsFromSubscriptWrite s
+getConstNullsRelatedFacts'''' _ = Set.empty
+
+getConstNullsRelatedFactsFromCall :: Bitcode.CallContent -> Set Kbgen.Fact
+getConstNullsRelatedFactsFromCall = getConstNullsFromValues . Bitcode.args
+
+getConstNullsRelatedFactsFromUnop :: Bitcode.UnopContent -> Set Kbgen.Fact
+getConstNullsRelatedFactsFromUnop = getConstNullsFromValue . Bitcode.unopLhs
+
+getConstNullsRelatedFactsFromBinop :: Bitcode.BinopContent -> Set Kbgen.Fact
+getConstNullsRelatedFactsFromBinop b = let
+    lhs = getConstNullsFromValue (Bitcode.binopLhs b)
+    rhs = getConstNullsFromValue (Bitcode.binopRhs b)
+    in Set.union lhs rhs
+
+getConstNullsRelatedFactsFromReturn :: Bitcode.ReturnContent -> Set Kbgen.Fact
+getConstNullsRelatedFactsFromReturn (Bitcode.ReturnContent Nothing) = Set.empty
+getConstNullsRelatedFactsFromReturn (Bitcode.ReturnContent (Just v)) = getConstNullsFromValue v
+
+getConstNullsRelatedFactsFromAssign :: Bitcode.AssignContent -> Set Kbgen.Fact
+getConstNullsRelatedFactsFromAssign = getConstNullsFromValue . Bitcode.assignInput
+
+getConstNullsRelatedFactsFromFieldWrite :: Bitcode.FieldWriteContent -> Set Kbgen.Fact
+getConstNullsRelatedFactsFromFieldWrite = getConstNullsFromValue . Bitcode.fieldWriteInput
+
+getConstNullsRelatedFactsFromSubscriptRead :: Bitcode.SubscriptReadContent -> Set Kbgen.Fact
+getConstNullsRelatedFactsFromSubscriptRead = getConstNullsFromValue . Bitcode.subscriptReadIdx
+
+getConstNullsRelatedFactsFromSubscriptWrite :: Bitcode.SubscriptWriteContent -> Set Kbgen.Fact
+getConstNullsRelatedFactsFromSubscriptWrite s = let
+    index = getConstNullsFromValue (Bitcode.subscriptWriteIdx s)
+    value = getConstNullsFromValue (Bitcode.subscriptWriteInput s)
+    in Set.union index value
+
+getConstNullsFromValues :: [ Bitcode.Value ] -> Set Kbgen.Fact
+getConstNullsFromValues = List.foldl' Set.union Set.empty . map getConstNullsFromValue
+
+getConstNullsFromValue :: Bitcode.Value -> Set Kbgen.Fact
+getConstNullsFromValue (Bitcode.ConstValueCtor (Bitcode.ConstNullValue n)) = getConstNullsFromValue' n
+getConstNullsFromValue _ = Set.empty
+
+getConstNullsFromValue' :: Token.ConstNull -> Set Kbgen.Fact
+getConstNullsFromValue' value = let
+    location = Token.constNullLocation value
+    constNull = Kbgen.ConstNull location
+    in Set.singleton (Kbgen.ConstNullCtor constNull)
+
+-- |
+-- Extract @kb_gated_return( Cond, ReturnedValue )@ facts for the
+-- \"single-return in an empty-else then-block\" idiom.
+--
+-- __Two tightened invariants__
+--
+--     1. Empty else       ( the if-statement has no else branch ).
+--     2. Exactly one       @return e;@ anywhere inside the then-body
+--                          -- possibly nested inside a further @if@
+--                          ( e.g. @if (X) { if (Y) return e; }@ ).
+--
+-- Any @if@ that violates either invariant emits nothing. Rejected
+-- shapes :
+--
+--     * @if (X) return a; else return b;@       ( non-empty else )
+--     * @if (X) { if (Y) return a; return b; }@ ( two returns )
+--     * @while (X) { return e; }@               ( loop back-edge : the
+--                                                 sibling\'s single
+--                                                 successor is not a
+--                                                 Nop-at-if-loc )
+--
+-- __How the codegen makes this cheap__
+--
+-- 'codeGenStmtIf' anchors both paired @Assume@ nodes at
+-- @Ast.stmtIfLocation stmtIf@, and 'Cfg.parallelNormalCfgs' now anchors
+-- the diamond\'s /join Nop/ at that same location. This gives us an
+-- O(1) empty-else test :
+--
+--     empty else  <=>  the sibling Assume\'s single CFG successor is a
+--                      Nop whose Location equals the Assume\'s Location.
+--
+-- With the join Nop known we then do a /bounded/ forward BFS from the
+-- current Assume that stops at ( and does not expand past ) the join
+-- Nop. So we never even visit the post-@if@ tail of the function.
+--
+-- Per-Assume cost drops from O( |reach(Assume)| ) to O( |then-block| ).
+--
+-- __Nested-if is welcome__
+--
+-- For @if (X) { if (Y) return e; }@ both the outer and the inner Assume
+-- pass all the invariants, so /two/ facts are emitted :
+--
+-- @
+-- kb_gated_return( loc(X), loc(e) ).
+-- kb_gated_return( loc(Y), loc(e) ).
+-- @
+--
+-- __Polarity__
+--
+-- Captured implicitly : the @Assume(_, False)@ side of an empty-else
+-- diamond has the join Nop as its only successor, so its bounded BFS
+-- visits nothing beyond itself and no fact is emitted from that side.
+getGatedReturnFacts :: Cfg -> Set Kbgen.Fact
+getGatedReturnFacts Cfg.Empty = Set.empty
+getGatedReturnFacts (Cfg.Normal content) = getGatedReturnFactsFromContent content
+
+getGatedReturnFactsFromContent :: Cfg.Content -> Set Kbgen.Fact
+getGatedReturnFactsFromContent content = let
+    allEdges = Cfg.actualEdges (Cfg.edges content)
+    allAssumes = collectAssumeNodes allEdges
+    in Foldable.foldl' (accumGatedReturnFactsForAssume allEdges allAssumes) Set.empty allAssumes
+
+collectAssumeNodes :: Set Cfg.Edge -> Set Cfg.Node
+collectAssumeNodes edges' = let
+    fromNodes = Set.map Cfg.from edges'
+    toNodes = Set.map Cfg.to edges'
+    in Set.filter isAssumeNode (Set.union fromNodes toNodes)
+
+isAssumeNode :: Cfg.Node -> Bool
+isAssumeNode (Cfg.Node i) = isAssumeInstruction i
+
+isAssumeInstruction :: Bitcode.Instruction -> Bool
+isAssumeInstruction (Bitcode.Instruction _ (Bitcode.Assume _)) = True
+isAssumeInstruction _ = False
+
+accumGatedReturnFactsForAssume :: Set Cfg.Edge -> Set Cfg.Node -> Set Kbgen.Fact -> Cfg.Node -> Set Kbgen.Fact
+accumGatedReturnFactsForAssume allEdges allAssumes acc a = Set.union acc (gatedReturnFactsForAssume allEdges allAssumes a)
+
+gatedReturnFactsForAssume :: Set Cfg.Edge -> Set Cfg.Node -> Cfg.Node -> Set Kbgen.Fact
+gatedReturnFactsForAssume allEdges allAssumes a = gatedReturnFactsForAssume' allEdges allAssumes a (getAssumeConditionValueFromNode a)
+
+gatedReturnFactsForAssume' :: Set Cfg.Edge -> Set Cfg.Node -> Cfg.Node -> Maybe Bitcode.Value -> Set Kbgen.Fact
+gatedReturnFactsForAssume' _ _ _ Nothing = Set.empty
+gatedReturnFactsForAssume' allEdges allAssumes a (Just condVal) = gatedReturnFactsForAssume'' allEdges a condVal (findSibling allAssumes a)
+
+-- | No sibling ==> we cannot verify the \"empty else\" invariant, so we
+-- refuse to emit anything ( conservative for this tightened tier ).
+gatedReturnFactsForAssume'' :: Set Cfg.Edge -> Cfg.Node -> Bitcode.Value -> Maybe Cfg.Node -> Set Kbgen.Fact
+gatedReturnFactsForAssume'' _ _ _ Nothing = Set.empty
+gatedReturnFactsForAssume'' allEdges a condVal (Just sibling) = gatedReturnFactsForAssume''' allEdges a condVal (findEmptyElseJoinNop allEdges a sibling)
+
+-- | If we could not identify a valid empty-else join Nop, no fact is
+-- emitted ( it is not an @if@ with an empty else, or the CFG shape is
+-- otherwise not what 'codeGenStmtIf' produces ).
+gatedReturnFactsForAssume''' :: Set Cfg.Edge -> Cfg.Node -> Bitcode.Value -> Maybe Cfg.Node -> Set Kbgen.Fact
+gatedReturnFactsForAssume''' _ _ _ Nothing = Set.empty
+gatedReturnFactsForAssume''' allEdges a condVal (Just joinNop) = let
+    thenRegion = boundedForwardReach allEdges a joinNop
+    in singleReturnFact condVal (returnedValuesInRegion thenRegion)
+
+-- | O(1) empty-else check. The sibling Assume\'s single CFG successor
+-- must be a Nop whose Location equals the sibling Assume\'s own
+-- Location -- guaranteed to hold for empty-else if-statements by the
+-- 'codeGenStmtIf' + 'Cfg.parallelNormalCfgs' construction. When the
+-- check passes we return that join Nop; otherwise 'Nothing'.
+findEmptyElseJoinNop :: Set Cfg.Edge -> Cfg.Node -> Cfg.Node -> Maybe Cfg.Node
+findEmptyElseJoinNop allEdges a sibling = findEmptyElseJoinNop' (assumeLocation a) (Set.toList (successorsOf allEdges sibling))
+
+findEmptyElseJoinNop' :: Maybe Location -> [ Cfg.Node ] -> Maybe Cfg.Node
+findEmptyElseJoinNop' (Just ifLoc) [ n ] = findEmptyElseJoinNop'' ifLoc n (isNopAt ifLoc n)
+findEmptyElseJoinNop' _ _ = Nothing
+
+findEmptyElseJoinNop'' :: Location -> Cfg.Node -> Bool -> Maybe Cfg.Node
+findEmptyElseJoinNop'' _ n True = Just n
+findEmptyElseJoinNop'' _ _ False = Nothing
+
+assumeLocation :: Cfg.Node -> Maybe Location
+assumeLocation (Cfg.Node (Bitcode.Instruction loc (Bitcode.Assume _))) = Just loc
+assumeLocation _ = Nothing
+
+isNopAt :: Location -> Cfg.Node -> Bool
+isNopAt loc (Cfg.Node (Bitcode.Instruction l Bitcode.Nop)) = l == loc
+isNopAt _ _ = False
+
+returnedValuesInRegion :: Set Cfg.Node -> [ Bitcode.Value ]
+returnedValuesInRegion = mapMaybe returnedValueOfNode . Set.toList
+
+returnedValueOfNode :: Cfg.Node -> Maybe Bitcode.Value
+returnedValueOfNode (Cfg.Node i) = getReturnedValueMaybe i
+
+singleReturnFact :: Bitcode.Value -> [ Bitcode.Value ] -> Set Kbgen.Fact
+singleReturnFact condVal [ retVal ] = Set.singleton (mkGatedReturnFact condVal retVal)
+singleReturnFact _ _ = Set.empty
+
+findSibling :: Set Cfg.Node -> Cfg.Node -> Maybe Cfg.Node
+findSibling allAssumes a = List.find (areSiblingAssumes a) (Set.toList (Set.delete a allAssumes))
+
+areSiblingAssumes :: Cfg.Node -> Cfg.Node -> Bool
+areSiblingAssumes (Cfg.Node x) (Cfg.Node y) = areSiblingAssumeInstructions x y
+
+areSiblingAssumeInstructions :: Bitcode.Instruction -> Bitcode.Instruction -> Bool
+areSiblingAssumeInstructions (Bitcode.Instruction l1 (Bitcode.Assume a1)) (Bitcode.Instruction l2 (Bitcode.Assume a2)) = l1 == l2 && Bitcode.assumeValue a1 == Bitcode.assumeValue a2 && Bitcode.assumeTruthy a1 /= Bitcode.assumeTruthy a2
+areSiblingAssumeInstructions _ _ = False
+
+-- | Forward BFS from @start@ that treats @boundary@ as a fence : nodes
+-- are visited, but @boundary@ is never expanded ( its successors are
+-- not explored ) and it is dropped from the returned visited set. On
+-- CFGs without a reachable @boundary@ ( e.g. all paths from @start@
+-- return before joining ) this degenerates to a plain forward BFS.
+boundedForwardReach :: Set Cfg.Edge -> Cfg.Node -> Cfg.Node -> Set Cfg.Node
+boundedForwardReach allEdges start boundary = boundedForwardReach' allEdges boundary (Set.singleton start) (Set.singleton start)
+
+boundedForwardReach' :: Set Cfg.Edge -> Cfg.Node -> Set Cfg.Node -> Set Cfg.Node -> Set Cfg.Node
+boundedForwardReach' allEdges boundary frontier visited = boundedForwardReach'' allEdges boundary frontier visited (Set.null frontier)
+
+boundedForwardReach'' :: Set Cfg.Edge -> Cfg.Node -> Set Cfg.Node -> Set Cfg.Node -> Bool -> Set Cfg.Node
+boundedForwardReach'' _ boundary _ visited True = Set.delete boundary visited
+boundedForwardReach'' allEdges boundary frontier visited False = let
+    stepped = Foldable.foldl' (accumSuccessors allEdges) Set.empty frontier
+    newlyReached = Set.difference stepped visited
+    newVisited = Set.union visited newlyReached
+    nextFrontier = Set.delete boundary newlyReached
+    in boundedForwardReach' allEdges boundary nextFrontier newVisited
+
+accumSuccessors :: Set Cfg.Edge -> Set Cfg.Node -> Cfg.Node -> Set Cfg.Node
+accumSuccessors allEdges acc n = Set.union acc (successorsOf allEdges n)
+
+successorsOf :: Set Cfg.Edge -> Cfg.Node -> Set Cfg.Node
+successorsOf allEdges n = Set.map Cfg.to (Set.filter (isOutgoingFrom n) allEdges)
+
+isOutgoingFrom :: Cfg.Node -> Cfg.Edge -> Bool
+isOutgoingFrom n e = Cfg.from e == n
+
+mkGatedReturnFact :: Bitcode.Value -> Bitcode.Value -> Kbgen.Fact
+mkGatedReturnFact condVal retVal = let
+    cond = Kbgen.Cond (Bitcode.locationValue condVal)
+    rv = Kbgen.ReturnedValue (Bitcode.locationValue retVal)
+    in Kbgen.GatedReturnCtor (Kbgen.GatedReturn cond rv)
+
+getAssumeConditionValueFromNode :: Cfg.Node -> Maybe Bitcode.Value
+getAssumeConditionValueFromNode (Cfg.Node i) = getAssumeConditionValue i
+
+getAssumeConditionValue :: Bitcode.Instruction -> Maybe Bitcode.Value
+getAssumeConditionValue (Bitcode.Instruction _ (Bitcode.Assume a)) = Just (Bitcode.assumeValue a)
+getAssumeConditionValue _ = Nothing
+
+getReturnedValueMaybe :: Bitcode.Instruction -> Maybe Bitcode.Value
+getReturnedValueMaybe (Bitcode.Instruction _ (Bitcode.Return (Bitcode.ReturnContent (Just v)))) = Just v
+getReturnedValueMaybe _ = Nothing
 
 getAssignmentsRelatedFacts :: Cfg -> Set Kbgen.Fact
 getAssignmentsRelatedFacts = getAssignmentsRelatedFacts' . instructions
