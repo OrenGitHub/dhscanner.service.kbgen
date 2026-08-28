@@ -49,7 +49,8 @@ factifyLambda' l = [
         getConstStringsRelatedFacts (Callable.lambdaBody l),
         getConstIntegersRelatedFacts (Callable.lambdaBody l),
         getConstNullsRelatedFacts (Callable.lambdaBody l),
-        getGatedReturnFacts (Callable.lambdaBody l)
+        getGatedReturnFacts (Callable.lambdaBody l),
+        getCallableReturnsFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l)
     ]
 
 factifyFunc :: Callable.FunctionContent -> Set Kbgen.Fact
@@ -64,7 +65,8 @@ factifyFunc' f = [
         getConstStringsRelatedFacts (Callable.funcBody f),
         getConstIntegersRelatedFacts (Callable.funcBody f),
         getConstNullsRelatedFacts (Callable.funcBody f),
-        getGatedReturnFacts (Callable.funcBody f)
+        getGatedReturnFacts (Callable.funcBody f),
+        getCallableReturnsFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f)
     ]
 
 factifyMethod :: Callable.MethodContent -> Set Kbgen.Fact
@@ -79,7 +81,8 @@ factifyMethod' m = [
         getConstStringsRelatedFacts (Callable.methodBody m),
         getConstIntegersRelatedFacts (Callable.methodBody m),
         getConstNullsRelatedFacts (Callable.methodBody m),
-        getGatedReturnFacts (Callable.methodBody m)
+        getGatedReturnFacts (Callable.methodBody m),
+        getCallableReturnsFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m)
     ]
 
 getCallableRelatedFacts :: Token.FuncName -> Location -> Set Kbgen.Fact
@@ -289,6 +292,43 @@ getConstNullsFromValue' value = let
     location = Token.constNullLocation value
     constNull = Kbgen.ConstNull location
     in Set.singleton (Kbgen.ConstNullCtor constNull)
+
+-- |
+-- Extract @kb_callable_returns_value( Callable, ReturnedValue )@ and
+-- @kb_callable_returns_without_value( Callable, ReturnStmtLocation )@
+-- facts by walking every 'Bitcode.Return' in the callable\'s CFG.
+--
+--     * If the return carries an expression, fire the value-carrying
+--       fact anchored at the returned value\'s location. Downstream
+--       predicates ( @kb_const_null@, @kb_call_resolved@, ... ) add
+--       semantic meaning to that location.
+--     * If the return is bare ( @return;@ ), fire the void fact
+--       anchored at the return statement\'s own location.
+--
+-- Parser-injected fall-through returns ( see
+-- @ensureCallableBodyEndsWithReturn@ in the TS parser ) flow through
+-- the first branch with the returned-value location coinciding with
+-- the callable\'s header location, so downstream analyses can still
+-- distinguish parser-injected returns from source-level returns.
+getCallableReturnsFacts :: Kbgen.Callable -> Cfg -> Set Kbgen.Fact
+getCallableReturnsFacts callable = getCallableReturnsFacts' callable . instructions
+
+getCallableReturnsFacts' :: Kbgen.Callable -> Set Bitcode.Instruction -> Set Kbgen.Fact
+getCallableReturnsFacts' callable = Foldable.foldl' (getCallableReturnsFacts'' callable) Set.empty
+
+getCallableReturnsFacts'' :: Kbgen.Callable -> Set Kbgen.Fact -> Bitcode.Instruction -> Set Kbgen.Fact
+getCallableReturnsFacts'' callable acc i = Set.union acc (getCallableReturnsFacts''' callable i)
+
+getCallableReturnsFacts''' :: Kbgen.Callable -> Bitcode.Instruction -> Set Kbgen.Fact
+getCallableReturnsFacts''' callable (Bitcode.Instruction loc (Bitcode.Return r)) = mkCallableReturnsFact callable loc r
+getCallableReturnsFacts''' _        _                                             = Set.empty
+
+mkCallableReturnsFact :: Kbgen.Callable -> Location -> Bitcode.ReturnContent -> Set Kbgen.Fact
+mkCallableReturnsFact callable _ (Bitcode.ReturnContent (Just v)) = let
+    rv = Kbgen.ReturnedValue (Bitcode.locationValue v)
+    in Set.singleton (Kbgen.CallableReturnsValueCtor (Kbgen.CallableReturnsValue callable rv))
+mkCallableReturnsFact callable retLoc (Bitcode.ReturnContent Nothing) =
+    Set.singleton (Kbgen.CallableReturnsWithoutValueCtor (Kbgen.CallableReturnsWithoutValue callable retLoc))
 
 -- |
 -- Extract @kb_gated_return( Cond, ReturnedValue )@ facts for the
