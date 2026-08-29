@@ -48,7 +48,7 @@ executable kbgen
         containers,
         filepath,
         regex-tdfa,
-        dhscanner-ast >= 1.1.5,
+        dhscanner-ast >= 1.2.0,
         dhscanner-bitcode >= 1.0.17,
         dhscanner-kbgen >= 1.2.0,
         split,
