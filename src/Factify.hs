@@ -35,6 +35,7 @@ factifyScript' s = [
         getConstIntegersRelatedFacts (Callable.scriptBody s),
         getConstNullsRelatedFacts (Callable.scriptBody s),
         getGatedReturnFacts (Callable.scriptBody s),
+        getComparisonFacts (Callable.scriptBody s),
         getAssignmentsRelatedFacts (Callable.scriptBody s)
     ]
 
@@ -50,6 +51,7 @@ factifyLambda' l = [
         getConstIntegersRelatedFacts (Callable.lambdaBody l),
         getConstNullsRelatedFacts (Callable.lambdaBody l),
         getGatedReturnFacts (Callable.lambdaBody l),
+        getComparisonFacts (Callable.lambdaBody l),
         getCallableReturnsFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l)
     ]
 
@@ -66,6 +68,7 @@ factifyFunc' f = [
         getConstIntegersRelatedFacts (Callable.funcBody f),
         getConstNullsRelatedFacts (Callable.funcBody f),
         getGatedReturnFacts (Callable.funcBody f),
+        getComparisonFacts (Callable.funcBody f),
         getCallableReturnsFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f)
     ]
 
@@ -82,6 +85,7 @@ factifyMethod' m = [
         getConstIntegersRelatedFacts (Callable.methodBody m),
         getConstNullsRelatedFacts (Callable.methodBody m),
         getGatedReturnFacts (Callable.methodBody m),
+        getComparisonFacts (Callable.methodBody m),
         getCallableReturnsFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m)
     ]
 
@@ -509,6 +513,40 @@ mkGatedReturnFact condVal retVal = let
     rv = Kbgen.ReturnedValue (Bitcode.locationValue retVal)
     in Kbgen.GatedReturnCtor (Kbgen.GatedReturn cond rv)
 
+-- | Extract @kb_comparison( Cond, Lhs, Rhs, Op )@ facts from the CFG.
+--
+-- Every @Bitcode.Binop@ whose operator tag is 'Bitcode.EqOp' or
+-- 'Bitcode.NeqOp' fires a fact keyed by the binop's *output* variable
+-- location ( so it composes with 'GatedReturn' whose @Cond@ slot uses
+-- the same location for an @if@ that early-returns on the comparison
+-- result ). Operators outside the equality family collapse to
+-- 'Bitcode.OtherOp' and produce no fact.
+getComparisonFacts :: Cfg -> Set Kbgen.Fact
+getComparisonFacts = getComparisonFacts' . instructions
+
+getComparisonFacts' :: Set Bitcode.Instruction -> Set Kbgen.Fact
+getComparisonFacts' = Foldable.foldl' getComparisonFacts'' Set.empty
+
+getComparisonFacts'' :: Set Kbgen.Fact -> Bitcode.Instruction -> Set Kbgen.Fact
+getComparisonFacts'' acc i = Set.union acc (getComparisonFactsFromInstruction i)
+
+getComparisonFactsFromInstruction :: Bitcode.Instruction -> Set Kbgen.Fact
+getComparisonFactsFromInstruction (Bitcode.Instruction _ (Bitcode.Binop b)) = comparisonFactFromBinop b
+getComparisonFactsFromInstruction _ = Set.empty
+
+comparisonFactFromBinop :: Bitcode.BinopContent -> Set Kbgen.Fact
+comparisonFactFromBinop b = case Bitcode.binopOperator b of
+    Bitcode.EqOp    -> Set.singleton (mkComparisonFact b "eq")
+    Bitcode.NeqOp   -> Set.singleton (mkComparisonFact b "neq")
+    Bitcode.OtherOp -> Set.empty
+
+mkComparisonFact :: Bitcode.BinopContent -> String -> Kbgen.Fact
+mkComparisonFact b op = let
+    cond = Kbgen.Cond (Bitcode.locationVariable (Bitcode.binopOutput b))
+    lhs  = Kbgen.Lhs  (Bitcode.locationValue    (Bitcode.binopLhs    b))
+    rhs  = Kbgen.Rhs  (Bitcode.locationValue    (Bitcode.binopRhs    b))
+    in Kbgen.ComparisonCtor (Kbgen.Comparison cond lhs rhs (Kbgen.ComparisonOp op))
+
 getAssumeConditionValueFromNode :: Cfg.Node -> Maybe Bitcode.Value
 getAssumeConditionValueFromNode (Cfg.Node i) = getAssumeConditionValue i
 
@@ -624,7 +662,11 @@ getDataflowFactsFromEveryArgToOutput'' output arg = let
     in Kbgen.DataflowEdge u v
 
 getDataflowFactsFromBinop :: Bitcode.BinopContent -> Set Kbgen.DataflowEdge
-getDataflowFactsFromBinop (Bitcode.BinopContent o lhs rhs) = Set.fromList [
+getDataflowFactsFromBinop b = let
+    o = Bitcode.binopOutput b
+    lhs = Bitcode.binopLhs b
+    rhs = Bitcode.binopRhs b
+    in Set.fromList [
         Kbgen.DataflowEdge (Kbgen.From (Bitcode.locationValue lhs)) (Kbgen.To (Bitcode.locationVariable o)),
         Kbgen.DataflowEdge (Kbgen.From (Bitcode.locationValue rhs)) (Kbgen.To (Bitcode.locationVariable o))
     ]
