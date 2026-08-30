@@ -52,6 +52,7 @@ factifyLambda' l = [
         getConstNullsRelatedFacts (Callable.lambdaBody l),
         getGatedReturnFacts (Callable.lambdaBody l),
         getComparisonFacts (Callable.lambdaBody l),
+        getCalledFromFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
         getCallableReturnsFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l)
     ]
 
@@ -69,6 +70,7 @@ factifyFunc' f = [
         getConstNullsRelatedFacts (Callable.funcBody f),
         getGatedReturnFacts (Callable.funcBody f),
         getComparisonFacts (Callable.funcBody f),
+        getCalledFromFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
         getCallableReturnsFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f)
     ]
 
@@ -86,6 +88,7 @@ factifyMethod' m = [
         getConstNullsRelatedFacts (Callable.methodBody m),
         getGatedReturnFacts (Callable.methodBody m),
         getComparisonFacts (Callable.methodBody m),
+        getCalledFromFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
         getCallableReturnsFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m)
     ]
 
@@ -546,6 +549,38 @@ mkComparisonFact b op = let
     lhs  = Kbgen.Lhs  (Bitcode.locationValue    (Bitcode.binopLhs    b))
     rhs  = Kbgen.Rhs  (Bitcode.locationValue    (Bitcode.binopRhs    b))
     in Kbgen.ComparisonCtor (Kbgen.Comparison cond lhs rhs (Kbgen.ComparisonOp op))
+
+-- | Extract @kb_called_from( Call, Callable )@ facts from the CFG.
+--
+-- Every 'Bitcode.Call' instruction inside the given callable's CFG
+-- fires one fact linking the call site's location back to the
+-- callable's own location. Enables intra-procedural reasoning that
+-- starts from a call and asks "which callable is this happening
+-- inside ?" -- eg the hop-bounded predicates
+-- 'utils_reaches_capability_verifier_*hop' and the level-1 case of
+-- 'utils_early_return_authenticating_function_call' in the
+-- queryengine's baked-in utils.pl.
+--
+-- Scripts are intentionally excluded : script top-level statements
+-- have no enclosing "callable" location ( 'Callable.ScriptContent'
+-- carries a 'filename' but no 'Location' ) and the existing
+-- factifyScript' pipeline doesn't emit params / return-values facts
+-- for the same reason.
+getCalledFromFacts :: Kbgen.Callable -> Cfg -> Set Kbgen.Fact
+getCalledFromFacts callable = getCalledFromFacts' callable . instructions
+
+getCalledFromFacts' :: Kbgen.Callable -> Set Bitcode.Instruction -> Set Kbgen.Fact
+getCalledFromFacts' callable = Foldable.foldl' (getCalledFromFacts'' callable) Set.empty
+
+getCalledFromFacts'' :: Kbgen.Callable -> Set Kbgen.Fact -> Bitcode.Instruction -> Set Kbgen.Fact
+getCalledFromFacts'' callable acc i = Set.union acc (getCalledFromFactFromInstruction callable i)
+
+getCalledFromFactFromInstruction :: Kbgen.Callable -> Bitcode.Instruction -> Set Kbgen.Fact
+getCalledFromFactFromInstruction callable (Bitcode.Instruction _ (Bitcode.Call c)) = Set.singleton (mkCalledFromFact callable c)
+getCalledFromFactFromInstruction _ _ = Set.empty
+
+mkCalledFromFact :: Kbgen.Callable -> Bitcode.CallContent -> Kbgen.Fact
+mkCalledFromFact callable c = Kbgen.CalledFromCtor (Kbgen.CalledFrom (Kbgen.Call (Bitcode.callLocation c)) callable)
 
 getAssumeConditionValueFromNode :: Cfg.Node -> Maybe Bitcode.Value
 getAssumeConditionValueFromNode (Cfg.Node i) = getAssumeConditionValue i
