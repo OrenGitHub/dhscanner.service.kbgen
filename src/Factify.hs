@@ -53,7 +53,8 @@ factifyLambda' l = [
         getGatedReturnFacts (Callable.lambdaBody l),
         getComparisonFacts (Callable.lambdaBody l),
         getCalledFromFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
-        getCallableReturnsFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l)
+        getCallableReturnsFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
+        callableSourceBodyLengthFact (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.Lambda l)
     ]
 
 factifyFunc :: Callable.FunctionContent -> Set Kbgen.Fact
@@ -71,7 +72,8 @@ factifyFunc' f = [
         getGatedReturnFacts (Callable.funcBody f),
         getComparisonFacts (Callable.funcBody f),
         getCalledFromFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
-        getCallableReturnsFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f)
+        getCallableReturnsFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
+        callableSourceBodyLengthFact (Kbgen.Callable (Callable.funcLocation f)) (Callable.Function f)
     ]
 
 factifyMethod :: Callable.MethodContent -> Set Kbgen.Fact
@@ -89,7 +91,8 @@ factifyMethod' m = [
         getGatedReturnFacts (Callable.methodBody m),
         getComparisonFacts (Callable.methodBody m),
         getCalledFromFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
-        getCallableReturnsFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m)
+        getCallableReturnsFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
+        callableSourceBodyLengthFact (Kbgen.Callable (Callable.methodLocation m)) (Callable.Method m)
     ]
 
 getCallableRelatedFacts :: Token.FuncName -> Location -> Set Kbgen.Fact
@@ -581,6 +584,22 @@ getCalledFromFactFromInstruction _ _ = Set.empty
 
 mkCalledFromFact :: Kbgen.Callable -> Bitcode.CallContent -> Kbgen.Fact
 mkCalledFromFact callable c = Kbgen.CalledFromCtor (Kbgen.CalledFrom (Kbgen.Call (Bitcode.callLocation c)) callable)
+
+-- | Emit @kb_callable_source_body_length( Callable, N )@ where N is the
+-- source-level @[ Ast.Stmt ]@ length captured at codegen time and preserved
+-- through the bitcode via 'Callable.numOriginalSourceInstructions'.
+--
+-- The wrapping 'Callable.Callable' is expected to have been constructed
+-- from the same content record the caller already has in hand (so the
+-- pattern-match inside 'numOriginalSourceInstructions' is trivially
+-- resolved by GHC's inliner); we take it explicitly rather than
+-- reconstructing a location because callers already know which
+-- @*Location@ accessor applies to their callable variant.
+callableSourceBodyLengthFact :: Kbgen.Callable -> Callable.Callable -> Set Kbgen.Fact
+callableSourceBodyLengthFact kbCallable rawCallable = Set.singleton
+    (Kbgen.CallableSourceBodyLengthCtor
+        (Kbgen.CallableSourceBodyLength kbCallable
+            (Callable.numOriginalSourceInstructions rawCallable)))
 
 getAssumeConditionValueFromNode :: Cfg.Node -> Maybe Bitcode.Value
 getAssumeConditionValueFromNode (Cfg.Node i) = getAssumeConditionValue i
