@@ -73,7 +73,8 @@ factifyFunc' f = [
         getComparisonFacts (Callable.funcBody f),
         getCalledFromFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
         getCallableReturnsFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
-        callableSourceBodyLengthFact (Kbgen.Callable (Callable.funcLocation f)) (Callable.Function f)
+        callableSourceBodyLengthFact (Kbgen.Callable (Callable.funcLocation f)) (Callable.Function f),
+        getCallableAnnotationFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcAnnotations f)
     ]
 
 factifyMethod :: Callable.MethodContent -> Set Kbgen.Fact
@@ -92,7 +93,8 @@ factifyMethod' m = [
         getComparisonFacts (Callable.methodBody m),
         getCalledFromFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
         getCallableReturnsFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
-        callableSourceBodyLengthFact (Kbgen.Callable (Callable.methodLocation m)) (Callable.Method m)
+        callableSourceBodyLengthFact (Kbgen.Callable (Callable.methodLocation m)) (Callable.Method m),
+        getCallableAnnotationFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodAnnotations m)
     ]
 
 getCallableRelatedFacts :: Token.FuncName -> Location -> Set Kbgen.Fact
@@ -600,6 +602,15 @@ callableSourceBodyLengthFact kbCallable rawCallable = Set.singleton
     (Kbgen.CallableSourceBodyLengthCtor
         (Kbgen.CallableSourceBodyLength kbCallable
             (Callable.numOriginalSourceInstructions rawCallable)))
+
+-- | @kb_callable_has_annotation( Callable, Annotation )@ -- the annotation's
+-- fqn / args come from the call facts codegen emits at the same location.
+getCallableAnnotationFacts :: Kbgen.Callable -> [ Callable.Annotation ] -> Set Kbgen.Fact
+getCallableAnnotationFacts kbCallable = Set.fromList . List.map (callableAnnotationFact kbCallable)
+
+callableAnnotationFact :: Kbgen.Callable -> Callable.Annotation -> Kbgen.Fact
+callableAnnotationFact kbCallable (Callable.Annotation loc) = Kbgen.CallableAnnotationCtor
+    (Kbgen.CallableAnnotation kbCallable (Kbgen.Annotation loc))
 
 getAssumeConditionValueFromNode :: Cfg.Node -> Maybe Bitcode.Value
 getAssumeConditionValueFromNode (Cfg.Node i) = getAssumeConditionValue i
