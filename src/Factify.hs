@@ -163,6 +163,7 @@ getConstStringsFromValues = List.foldl' Set.union Set.empty . map getConstString
 
 getConstStringsFromValue :: Bitcode.Value -> Set Kbgen.Fact
 getConstStringsFromValue (Bitcode.ConstValueCtor (Bitcode.ConstStrValue s)) = getConstStringsFromValue' s
+getConstStringsFromValue (Bitcode.KeywordArgCtor k) = getConstStringsFromValue (Bitcode.keywordArgValue k)
 getConstStringsFromValue _ = Set.empty
 
 getConstStringsFromValue' :: Token.ConstStr -> Set Kbgen.Fact
@@ -230,6 +231,7 @@ getConstIntegersFromValues = List.foldl' Set.union Set.empty . map getConstInteg
 
 getConstIntegersFromValue :: Bitcode.Value -> Set Kbgen.Fact
 getConstIntegersFromValue (Bitcode.ConstValueCtor (Bitcode.ConstIntValue i)) = getConstIntegersFromValue' i
+getConstIntegersFromValue (Bitcode.KeywordArgCtor k) = getConstIntegersFromValue (Bitcode.keywordArgValue k)
 getConstIntegersFromValue _ = Set.empty
 
 getConstIntegersFromValue' :: Token.ConstInt -> Set Kbgen.Fact
@@ -297,6 +299,7 @@ getConstNullsFromValues = List.foldl' Set.union Set.empty . map getConstNullsFro
 
 getConstNullsFromValue :: Bitcode.Value -> Set Kbgen.Fact
 getConstNullsFromValue (Bitcode.ConstValueCtor (Bitcode.ConstNullValue n)) = getConstNullsFromValue' n
+getConstNullsFromValue (Bitcode.KeywordArgCtor k) = getConstNullsFromValue (Bitcode.keywordArgValue k)
 getConstNullsFromValue _ = Set.empty
 
 getConstNullsFromValue' :: Token.ConstNull -> Set Kbgen.Fact
@@ -806,7 +809,7 @@ getResolvedCallFacts c = getResolvedCallFacts' (Bitcode.variableFqn (Bitcode.cal
 
 getKeywordArgsForCallFacts :: Bitcode.CallContent -> Set Kbgen.Fact
 getKeywordArgsForCallFacts callContent = let
-    call = Kbgen.Call (Bitcode.locationVariable (Bitcode.callee callContent))
+    call = Kbgen.Call (Bitcode.callLocation callContent)
     keywordArgs = keepOnlyKeywrodArgs (Bitcode.args callContent)
     in getKeywordArgsForCallFacts' call keywordArgs
 
