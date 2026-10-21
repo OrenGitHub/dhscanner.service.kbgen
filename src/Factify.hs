@@ -866,7 +866,8 @@ getClassRelatedFacts' :: Callable.MethodContent -> [ Set Kbgen.Fact ]
 getClassRelatedFacts' m = [
         classDef m,
         methodOfClass m,
-        classResolvedSupers m
+        classResolvedSupers m,
+        classAnnotations m
     ]
 
 classDef :: Callable.MethodContent -> Set Kbgen.Fact
@@ -883,6 +884,14 @@ methodOfClass m = let
     c = Kbgen.Class (Token.getClassNameLocation className)
     m' = Kbgen.Method (Callable.methodLocation m)
     in Set.singleton (Kbgen.MethodOfClassCtor (Kbgen.MethodOfClass m' c))
+
+-- | @kb_class_has_annotation( Class, Annotation )@ -- every method carries
+-- its hosting class's annotations, so each class's set is re-derived per
+-- method and deduplicated by the 'Set'.
+classAnnotations :: Callable.MethodContent -> Set Kbgen.Fact
+classAnnotations m = let
+    c = Kbgen.Class (Token.getClassNameLocation (Callable.hostingClassName m))
+    in Set.fromList [ Kbgen.ClassAnnotationCtor (Kbgen.ClassAnnotation c (Kbgen.Annotation loc)) | Callable.Annotation loc <- Callable.hostingClassAnnotations m ]
 
 classResolvedSupers :: Callable.MethodContent -> Set Kbgen.Fact
 classResolvedSupers m = classResolvedSupers' (Callable.hostingClassName m) (Callable.hostingClassSupers m)
