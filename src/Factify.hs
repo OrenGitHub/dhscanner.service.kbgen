@@ -663,20 +663,25 @@ getParamsRelatedFacts''' callable param = [
         getParamNameFact param,
         getParamResolvedTypeFact param,
         getParamiOfCallableFact param callable
-    ]
+    ] ++ getParamAnnotationFacts param
+
+getParamAnnotationFacts :: Bitcode.ParamDeclContent -> [ Kbgen.Fact ]
+getParamAnnotationFacts (Bitcode.ParamDeclContent (Bitcode.ParamVariable _ _ name) annotations) = let
+    p = Kbgen.Param (Token.getParamNameLocation name)
+    in [ Kbgen.ParamAnnotationCtor (Kbgen.ParamAnnotation p (Kbgen.Annotation loc)) | Bitcode.Annotation loc <- annotations ]
 
 getParamNameFact :: Bitcode.ParamDeclContent -> Kbgen.Fact
-getParamNameFact (Bitcode.ParamDeclContent (Bitcode.ParamVariable _ _ name)) = let
+getParamNameFact (Bitcode.ParamDeclContent (Bitcode.ParamVariable _ _ name) _) = let
     p = Kbgen.Param (Token.getParamNameLocation name)
     in Kbgen.ParamNameCtor (Kbgen.ParamName p name)
 
 getParamResolvedTypeFact :: Bitcode.ParamDeclContent -> Kbgen.Fact
-getParamResolvedTypeFact (Bitcode.ParamDeclContent (Bitcode.ParamVariable t _ name)) = let
+getParamResolvedTypeFact (Bitcode.ParamDeclContent (Bitcode.ParamVariable t _ name) _) = let
     p = Kbgen.Param (Token.getParamNameLocation name)
     in Kbgen.ParamResolvedTypeCtor (Kbgen.ParamResolvedType p (Kbgen.ResolvedType t))
 
 getParamiOfCallableFact :: Bitcode.ParamDeclContent -> Kbgen.Callable -> Kbgen.Fact
-getParamiOfCallableFact (Bitcode.ParamDeclContent (Bitcode.ParamVariable _ i name)) c = let
+getParamiOfCallableFact (Bitcode.ParamDeclContent (Bitcode.ParamVariable _ i name) _) c = let
     p = Kbgen.Param (Token.getParamNameLocation name)
     in Kbgen.ParamiOfCallableCtor (Kbgen.ParamiOfCallable p (Kbgen.ParamIndex i) c)
 
