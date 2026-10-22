@@ -608,11 +608,11 @@ callableSourceBodyLengthFact kbCallable rawCallable = Set.singleton
 
 -- | @kb_callable_has_annotation( Callable, Annotation )@ -- the annotation's
 -- fqn / args come from the call facts codegen emits at the same location.
-getCallableAnnotationFacts :: Kbgen.Callable -> [ Callable.Annotation ] -> Set Kbgen.Fact
+getCallableAnnotationFacts :: Kbgen.Callable -> [ Bitcode.Annotation ] -> Set Kbgen.Fact
 getCallableAnnotationFacts kbCallable = Set.fromList . List.map (callableAnnotationFact kbCallable)
 
-callableAnnotationFact :: Kbgen.Callable -> Callable.Annotation -> Kbgen.Fact
-callableAnnotationFact kbCallable (Callable.Annotation loc) = Kbgen.CallableAnnotationCtor
+callableAnnotationFact :: Kbgen.Callable -> Bitcode.Annotation -> Kbgen.Fact
+callableAnnotationFact kbCallable (Bitcode.Annotation loc) = Kbgen.CallableAnnotationCtor
     (Kbgen.CallableAnnotation kbCallable (Kbgen.Annotation loc))
 
 getAssumeConditionValueFromNode :: Cfg.Node -> Maybe Bitcode.Value
@@ -899,7 +899,7 @@ methodOfClass m = let
 classAnnotations :: Callable.MethodContent -> Set Kbgen.Fact
 classAnnotations m = let
     c = Kbgen.Class (Token.getClassNameLocation (Callable.hostingClassName m))
-    in Set.fromList [ Kbgen.ClassAnnotationCtor (Kbgen.ClassAnnotation c (Kbgen.Annotation loc)) | Callable.Annotation loc <- Callable.hostingClassAnnotations m ]
+    in Set.fromList [ Kbgen.ClassAnnotationCtor (Kbgen.ClassAnnotation c (Kbgen.Annotation loc)) | Bitcode.Annotation loc <- Callable.hostingClassAnnotations m ]
 
 classResolvedSupers :: Callable.MethodContent -> Set Kbgen.Fact
 classResolvedSupers m = classResolvedSupers' (Callable.hostingClassName m) (Callable.hostingClassSupers m)
