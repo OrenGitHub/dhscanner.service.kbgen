@@ -53,6 +53,7 @@ factifyLambda' l = [
         getConstNullsRelatedFacts (Callable.lambdaBody l),
         getGatedReturnFacts (Callable.lambdaBody l),
         getGatedCallFacts (Callable.lambdaBody l),
+        getTopLevelIfThenElseFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
         getComparisonFacts (Callable.lambdaBody l),
         getCalledFromFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
         getCallableReturnsFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
@@ -73,6 +74,7 @@ factifyFunc' f = [
         getConstNullsRelatedFacts (Callable.funcBody f),
         getGatedReturnFacts (Callable.funcBody f),
         getGatedCallFacts (Callable.funcBody f),
+        getTopLevelIfThenElseFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
         getComparisonFacts (Callable.funcBody f),
         getCalledFromFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
         getCallableReturnsFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
@@ -94,6 +96,7 @@ factifyMethod' m = [
         getConstNullsRelatedFacts (Callable.methodBody m),
         getGatedReturnFacts (Callable.methodBody m),
         getGatedCallFacts (Callable.methodBody m),
+        getTopLevelIfThenElseFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
         getComparisonFacts (Callable.methodBody m),
         getCalledFromFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
         getCallableReturnsFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
@@ -580,6 +583,59 @@ callLocationOfNode _ = Nothing
 
 mkGatedCallFact :: Kbgen.Cond -> Kbgen.Branch -> Location -> Kbgen.Fact
 mkGatedCallFact cond branch call = Kbgen.GatedCallCtor (Kbgen.GatedCall cond (Kbgen.Call call) branch)
+
+data IfThenElse = IfThenElse
+    Location -- ^ cond
+    Cfg.Node -- ^ the then part Assume
+    (Set Cfg.Node) -- ^ then part
+    (Set Cfg.Node) -- ^ else part
+
+-- |
+-- Extract @kb_top_level_if_then_else_gadget( Callable, Cond, ThenPart, ElsePart )@
+-- and the @kb_call_guarded_by_cond_in_{then,else}_part@ facts of its calls.
+--
+-- Same diamond shape as 'getGatedCallFacts'. An @if@ with an empty else
+-- is not a gadget, and an @if@ whose Assume sits inside another @if@\'s
+-- then \/ else part is not top level.
+getTopLevelIfThenElseFacts :: Kbgen.Callable -> Cfg -> Set Kbgen.Fact
+getTopLevelIfThenElseFacts _ Cfg.Empty = Set.empty
+getTopLevelIfThenElseFacts callable (Cfg.Normal content) = let
+    allEdges = Cfg.actualEdges (Cfg.edges content)
+    allNodes = Cfg.actualNodes (Cfg.nodes (Cfg.Normal content))
+    allAssumes = collectAssumeNodes allEdges
+    ifs = mapMaybe (ifThenElse allEdges allNodes allAssumes) (Set.toList (Set.filter isTruthyAssume allAssumes))
+    nested = Foldable.foldMap' ifThenElseParts ifs
+    in Foldable.foldMap' (ifThenElseFacts callable) (List.filter (isTopLevel nested) ifs)
+
+ifThenElse :: Set Cfg.Edge -> Set Cfg.Node -> Set Cfg.Node -> Cfg.Node -> Maybe IfThenElse
+ifThenElse allEdges allNodes allAssumes a@(Cfg.Node (Bitcode.Instruction _ (Bitcode.Assume assume))) = do
+    sibling <- findSibling allAssumes a
+    joinNop <- ifDiamondJoinNop allNodes allAssumes a
+    let cond = Bitcode.locationValue (Bitcode.assumeValue assume)
+    let thenPart = Set.delete a (boundedForwardReach allEdges a joinNop)
+    let elsePart = Set.delete sibling (boundedForwardReach allEdges sibling joinNop)
+    if Set.null elsePart then Nothing else Just (IfThenElse cond a thenPart elsePart)
+ifThenElse _ _ _ _ = Nothing
+
+isTruthyAssume :: Cfg.Node -> Bool
+isTruthyAssume (Cfg.Node (Bitcode.Instruction _ (Bitcode.Assume assume))) = Bitcode.assumeTruthy assume
+isTruthyAssume _ = False
+
+ifThenElseParts :: IfThenElse -> Set Cfg.Node
+ifThenElseParts (IfThenElse _ _ thenPart elsePart) = Set.union thenPart elsePart
+
+isTopLevel :: Set Cfg.Node -> IfThenElse -> Bool
+isTopLevel nested (IfThenElse _ a _ _) = Set.notMember a nested
+
+ifThenElseFacts :: Kbgen.Callable -> IfThenElse -> Set Kbgen.Fact
+ifThenElseFacts callable (IfThenElse c _ thenPart elsePart) = let
+    cond = Kbgen.Cond c
+    thenPart' = Kbgen.ThenPart c
+    elsePart' = Kbgen.ElsePart c
+    gadget = Kbgen.TopLevelIfThenElseGadgetCtor (Kbgen.TopLevelIfThenElseGadget callable cond thenPart' elsePart')
+    thenCalls = List.map (\call -> Kbgen.CallGuardedByCondInThenPartCtor (Kbgen.CallGuardedByCondInThenPart (Kbgen.Call call) cond thenPart')) (mapMaybe callLocationOfNode (Set.toList thenPart))
+    elseCalls = List.map (\call -> Kbgen.CallGuardedByCondInElsePartCtor (Kbgen.CallGuardedByCondInElsePart (Kbgen.Call call) cond elsePart')) (mapMaybe callLocationOfNode (Set.toList elsePart))
+    in Set.fromList (gadget : thenCalls ++ elseCalls)
 
 -- | Extract @kb_comparison( Cond, Lhs, Rhs, Op )@ facts from the CFG.
 --
