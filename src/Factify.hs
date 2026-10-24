@@ -35,7 +35,6 @@ factifyScript' s = [
         getConstIntegersRelatedFacts (Callable.scriptBody s),
         getConstNullsRelatedFacts (Callable.scriptBody s),
         getGatedReturnFacts (Callable.scriptBody s),
-        getGatedCallFacts (Callable.scriptBody s),
         getComparisonFacts (Callable.scriptBody s),
         getAssignmentsRelatedFacts (Callable.scriptBody s)
     ]
@@ -52,7 +51,6 @@ factifyLambda' l = [
         getConstIntegersRelatedFacts (Callable.lambdaBody l),
         getConstNullsRelatedFacts (Callable.lambdaBody l),
         getGatedReturnFacts (Callable.lambdaBody l),
-        getGatedCallFacts (Callable.lambdaBody l),
         getTopLevelIfThenElseFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
         getComparisonFacts (Callable.lambdaBody l),
         getCalledFromFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
@@ -73,7 +71,6 @@ factifyFunc' f = [
         getConstIntegersRelatedFacts (Callable.funcBody f),
         getConstNullsRelatedFacts (Callable.funcBody f),
         getGatedReturnFacts (Callable.funcBody f),
-        getGatedCallFacts (Callable.funcBody f),
         getTopLevelIfThenElseFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
         getComparisonFacts (Callable.funcBody f),
         getCalledFromFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
@@ -95,7 +92,6 @@ factifyMethod' m = [
         getConstIntegersRelatedFacts (Callable.methodBody m),
         getConstNullsRelatedFacts (Callable.methodBody m),
         getGatedReturnFacts (Callable.methodBody m),
-        getGatedCallFacts (Callable.methodBody m),
         getTopLevelIfThenElseFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
         getComparisonFacts (Callable.methodBody m),
         getCalledFromFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
@@ -531,43 +527,6 @@ mkGatedReturnFact condVal retVal = let
     rv = Kbgen.ReturnedValue (Bitcode.locationValue retVal)
     in Kbgen.GatedReturnCtor (Kbgen.GatedReturn cond rv)
 
--- |
--- Extract @kb_gated_call( Cond, Call, Branch )@ facts : every call on
--- one branch of an @if@ statement, keyed by the @if@ condition and the
--- branch ( @true@ = then, @false@ = else ).
---
--- Same diamond shape as 'getGatedReturnFacts' : 'codeGenStmtIf' anchors
--- both paired @Assume@ nodes and the join Nop at the @if@ location, so a
--- branch is the bounded forward BFS from its @Assume@ that stops at the
--- join Nop. Unlike the gated-return tier, a non-empty else is welcome :
--- each @Assume@ contributes the calls of its own branch, and the empty
--- side of an empty-else @if@ contributes nothing.
---
--- An @Assume@ without a sibling, or whose join Nop is missing from the
--- CFG, is not an @if@ diamond and emits nothing.
-getGatedCallFacts :: Cfg -> Set Kbgen.Fact
-getGatedCallFacts Cfg.Empty = Set.empty
-getGatedCallFacts (Cfg.Normal content) = getGatedCallFactsFromContent content
-
-getGatedCallFactsFromContent :: Cfg.Content -> Set Kbgen.Fact
-getGatedCallFactsFromContent content = let
-    allEdges = Cfg.actualEdges (Cfg.edges content)
-    allNodes = Cfg.actualNodes (Cfg.nodes (Cfg.Normal content))
-    allAssumes = collectAssumeNodes allEdges
-    in Foldable.foldMap' (gatedCallFactsForAssume allEdges allNodes allAssumes) allAssumes
-
-gatedCallFactsForAssume :: Set Cfg.Edge -> Set Cfg.Node -> Set Cfg.Node -> Cfg.Node -> Set Kbgen.Fact
-gatedCallFactsForAssume allEdges allNodes allAssumes a = gatedCallFactsForAssume' allEdges a (ifDiamondJoinNop allNodes allAssumes a)
-
-gatedCallFactsForAssume' :: Set Cfg.Edge -> Cfg.Node -> Maybe Cfg.Node -> Set Kbgen.Fact
-gatedCallFactsForAssume' _ _ Nothing = Set.empty
-gatedCallFactsForAssume' allEdges a@(Cfg.Node (Bitcode.Instruction _ (Bitcode.Assume assume))) (Just joinNop) = let
-    cond = Kbgen.Cond (Bitcode.locationValue (Bitcode.assumeValue assume))
-    branch = Kbgen.Branch (Bitcode.assumeTruthy assume)
-    calls = mapMaybe callLocationOfNode (Set.toList (boundedForwardReach allEdges a joinNop))
-    in Set.fromList (List.map (mkGatedCallFact cond branch) calls)
-gatedCallFactsForAssume' _ _ _ = Set.empty
-
 -- | The join Nop of the @if@ diamond @a@ opens : it shares the @if@
 -- location, and only exists when @a@ has a sibling @Assume@.
 ifDiamondJoinNop :: Set Cfg.Node -> Set Cfg.Node -> Cfg.Node -> Maybe Cfg.Node
@@ -581,9 +540,6 @@ callLocationOfNode :: Cfg.Node -> Maybe Location
 callLocationOfNode (Cfg.Node (Bitcode.Instruction _ (Bitcode.Call c))) = Just (Bitcode.callLocation c)
 callLocationOfNode _ = Nothing
 
-mkGatedCallFact :: Kbgen.Cond -> Kbgen.Branch -> Location -> Kbgen.Fact
-mkGatedCallFact cond branch call = Kbgen.GatedCallCtor (Kbgen.GatedCall cond (Kbgen.Call call) branch)
-
 data IfThenElse = IfThenElse
     Location -- ^ cond
     Cfg.Node -- ^ the then part Assume
@@ -594,7 +550,9 @@ data IfThenElse = IfThenElse
 -- Extract @kb_top_level_if_then_else_gadget( Callable, Cond, ThenPart, ElsePart )@
 -- and the @kb_call_guarded_by_cond_in_{then,else}_part@ facts of its calls.
 --
--- Same diamond shape as 'getGatedCallFacts'. An @if@ with an empty else
+-- 'codeGenStmtIf' anchors both paired @Assume@ nodes and the join Nop at
+-- the @if@ location, so a part is the bounded forward BFS from its
+-- @Assume@ that stops at the join Nop. An @if@ with an empty else
 -- is not a gadget, and an @if@ whose Assume sits inside another @if@\'s
 -- then \/ else part is not top level.
 getTopLevelIfThenElseFacts :: Kbgen.Callable -> Cfg -> Set Kbgen.Fact
