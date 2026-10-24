@@ -31,6 +31,7 @@ factifyScript s = List.foldl' Set.union Set.empty (factifyScript' s)
 factifyScript' :: Callable.ScriptContent -> [ Set Kbgen.Fact ]
 factifyScript' s = [
         getCallsRelatedFacts (Callable.scriptBody s),
+        getFieldReadsRelatedFacts (Callable.scriptBody s),
         getConstStringsRelatedFacts (Callable.scriptBody s),
         getConstIntegersRelatedFacts (Callable.scriptBody s),
         getConstNullsRelatedFacts (Callable.scriptBody s),
@@ -46,6 +47,7 @@ factifyLambda' :: Callable.LambdaContent -> [ Set Kbgen.Fact ]
 factifyLambda' l = [
         getDataflowFacts (Callable.lambdaBody l),
         getCallsRelatedFacts (Callable.lambdaBody l),
+        getFieldReadsRelatedFacts (Callable.lambdaBody l),
         getParamsRelatedFacts (Kbgen.Callable (Callable.lambdaLocation l)) (Callable.lambdaBody l),
         getConstStringsRelatedFacts (Callable.lambdaBody l),
         getConstIntegersRelatedFacts (Callable.lambdaBody l),
@@ -64,6 +66,7 @@ factifyFunc f = List.foldl' Set.union Set.empty (factifyFunc' f)
 factifyFunc' :: Callable.FunctionContent -> [ Set Kbgen.Fact ]
 factifyFunc' f = [
         getCallsRelatedFacts (Callable.funcBody f),
+        getFieldReadsRelatedFacts (Callable.funcBody f),
         getDataflowFacts (Callable.funcBody f),
         getCallableRelatedFacts (Callable.funcName f) (Callable.funcLocation f),
         getParamsRelatedFacts (Kbgen.Callable (Callable.funcLocation f)) (Callable.funcBody f),
@@ -87,6 +90,7 @@ factifyMethod' m = [
         getClassRelatedFacts m,
         getDataflowFacts (Callable.methodBody m),
         getCallsRelatedFacts (Callable.methodBody m),
+        getFieldReadsRelatedFacts (Callable.methodBody m),
         getParamsRelatedFacts (Kbgen.Callable (Callable.methodLocation m)) (Callable.methodBody m),
         getConstStringsRelatedFacts (Callable.methodBody m),
         getConstIntegersRelatedFacts (Callable.methodBody m),
@@ -879,6 +883,39 @@ getResolvedCallFacts' (Fqn.CallMethodOfUntypedNamedParam _ m p) call = getResolv
 getResolvedCallFacts' (Fqn.CallFuncFromImportedDir _ f d) call = getResolvedCallFacts'''' call (Kbgen.FuncName f) (Kbgen.FuncDefinedInDir d)
 getResolvedCallFacts' (Fqn.CallFuncFromImportedFile _ func f) call = getResolvedCallFacts5 call (Kbgen.FuncName func) (Kbgen.FuncDefinedInFile f)
 getResolvedCallFacts' fqn call = Set.singleton (Kbgen.CallResolvedCtor (Kbgen.CallResolved call (Kbgen.Resolved fqn)))
+
+-- | @kb_field_read_resolved( FieldRead, Fqn )@ -- only for field reads
+-- rooted at a third party import ( @RequestMethod.GET@ ), where the fqn
+-- says something; @this.x@ and reads off unknown values are skipped to
+-- keep the KB small. So are reads that are a call's callee
+-- ( @StringUtils.isBlank@ ) : 'CallResolved' already carries their fqn.
+getFieldReadsRelatedFacts :: Cfg -> Set Kbgen.Fact
+getFieldReadsRelatedFacts cfg = getFieldReadsRelatedFacts' (calleeLocations cfg) (instructions cfg)
+
+getFieldReadsRelatedFacts' :: Set Location -> Set Bitcode.Instruction -> Set Kbgen.Fact
+getFieldReadsRelatedFacts' callees = Set.fromList . mapMaybe (getFieldReadResolvedFact callees) . Set.toList
+
+calleeLocations :: Cfg -> Set Location
+calleeLocations = Set.map (Bitcode.locationVariable . Bitcode.callee) . justCalls . instructions
+
+getFieldReadResolvedFact :: Set Location -> Bitcode.Instruction -> Maybe Kbgen.Fact
+getFieldReadResolvedFact callees (Bitcode.Instruction _ (Bitcode.FieldRead r)) = getFieldReadResolvedFact' callees (Bitcode.fieldReadOutput r)
+getFieldReadResolvedFact _ _ = Nothing
+
+getFieldReadResolvedFact' :: Set Location -> Bitcode.Variable -> Maybe Kbgen.Fact
+getFieldReadResolvedFact' callees output
+    | Set.member (Bitcode.locationVariable output) callees = Nothing
+    | otherwise = getFieldReadResolvedFact'' (Bitcode.locationVariable output) (Bitcode.variableFqn output)
+
+getFieldReadResolvedFact'' :: Location -> Fqn.Fqn -> Maybe Kbgen.Fact
+getFieldReadResolvedFact'' loc fqn
+    | isRootedAtThirdPartyImport fqn = Just (Kbgen.FieldReadResolvedCtor (Kbgen.FieldReadResolved (Kbgen.FieldRead loc) (Kbgen.Resolved fqn)))
+    | otherwise = Nothing
+
+isRootedAtThirdPartyImport :: Fqn.Fqn -> Bool
+isRootedAtThirdPartyImport (Fqn.FieldedAccess fqn _) = isRootedAtThirdPartyImport fqn
+isRootedAtThirdPartyImport (Fqn.ThirdPartyImport _) = True
+isRootedAtThirdPartyImport _ = False
 
 getResolvedCallFacts :: Bitcode.CallContent -> Set Kbgen.Fact
 getResolvedCallFacts c = getResolvedCallFacts' (Bitcode.variableFqn (Bitcode.callee c)) (Kbgen.Call (Bitcode.callLocation c))
