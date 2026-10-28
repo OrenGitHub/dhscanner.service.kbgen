@@ -1,4 +1,3 @@
-FROM ubuntu
-COPY kbgen.elf.x64 .
-RUN chmod +x kbgen.elf.x64
-CMD ["./kbgen.elf.x64"]
+FROM scratch
+COPY --chmod=755 kbgen.elf.x64 /kbgen.elf.x64
+CMD ["/kbgen.elf.x64"]
