@@ -1031,6 +1031,8 @@ classResolvedSuper _ _ = Nothing
 classResolvedSuper' :: Token.ClassName -> Token.SuperName -> Fqn.Fqn -> Maybe Kbgen.Fact
 classResolvedSuper' c s (Fqn.FirstPartyImport (Fqn.FirstPartyImportContent path _)) = Just (classResolved1stPartySuper c s path)
 classResolvedSuper' c s fqn@(Fqn.ThirdPartyImport _) = Just (classResolved3rdPartySuper c s fqn)
+-- a super class defined earlier in the same file ( runner #126, G2b )
+classResolvedSuper' c s (Fqn.ClassName (Fqn.ClassNameContent (Token.ClassName superClass))) = Just (classResolved1stPartySuper c s (Location.filename (Token.location superClass)))
 classResolvedSuper' _ _ _ = Nothing
 
 classResolved1stPartySuper :: Token.ClassName -> Token.SuperName -> FilePath -> Kbgen.Fact
