@@ -1029,11 +1029,18 @@ classResolvedSuper c (Callable.HostingClassSuper superName (Just fqnSuper)) = cl
 classResolvedSuper _ _ = Nothing
 
 classResolvedSuper' :: Token.ClassName -> Token.SuperName -> Fqn.Fqn -> Maybe Kbgen.Fact
-classResolvedSuper' c s (Fqn.FirstPartyImport (Fqn.FirstPartyImportContent path _)) = Just (classResolved1stPartySuper c s path)
+classResolvedSuper' c s (Fqn.FirstPartyImport (Fqn.FirstPartyImportContent path name)) = Just (classResolved1stPartySuper c (importedSuperName s name) path)
 classResolvedSuper' c s fqn@(Fqn.ThirdPartyImport _) = Just (classResolved3rdPartySuper c s fqn)
 -- a super class defined earlier in the same file ( runner #126, G2b )
 classResolvedSuper' c s (Fqn.ClassName (Fqn.ClassNameContent (Token.ClassName superClass))) = Just (classResolved1stPartySuper c s (Location.filename (Token.location superClass)))
 classResolvedSuper' _ _ _ = Nothing
+
+-- | the name the super is defined with in its file, not the local alias :
+-- `from weblate.trans.views.about import StatsView as S` + `class X(S)`
+-- -> super `StatsView` of `weblate/trans/views/about.py` ( runner #131 )
+importedSuperName :: Token.SuperName -> Maybe String -> Token.SuperName
+importedSuperName (Token.SuperName (Token.Named _ l)) (Just name) = Token.SuperName (Token.Named name l)
+importedSuperName s Nothing = s
 
 classResolved1stPartySuper :: Token.ClassName -> Token.SuperName -> FilePath -> Kbgen.Fact
 classResolved1stPartySuper (Token.ClassName (Token.Named _ c)) s f = classResolved1stPartySuper' (Kbgen.Class c) s (Kbgen.SuperDefinedInFile f)
