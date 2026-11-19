@@ -882,6 +882,10 @@ getResolvedCallFacts' (Fqn.CallMethodOfClass _ m c) call = getResolvedCallFacts'
 getResolvedCallFacts' (Fqn.CallMethodOfUntypedNamedParam _ m p) call = getResolvedCallFacts''' call (Kbgen.MethodName m) p
 getResolvedCallFacts' (Fqn.CallFuncFromImportedDir _ f d) call = getResolvedCallFacts'''' call (Kbgen.FuncName f) (Kbgen.FuncDefinedInDir d)
 getResolvedCallFacts' (Fqn.CallFuncFromImportedFile _ func f) call = getResolvedCallFacts5 call (Kbgen.FuncName func) (Kbgen.FuncDefinedInFile f)
+getResolvedCallFacts' fqn@(Fqn.FieldedAccess (Fqn.FirstPartyImport (Fqn.FirstPartyImportContent f (Just name))) (Token.FieldName (Token.Named m _))) call = Set.fromList [
+        Kbgen.CallResolvedCtor (Kbgen.CallResolved call (Kbgen.Resolved fqn)),
+        Kbgen.CallMethodOf1stPartyImportedNameCtor (Kbgen.CallMethodOf1stPartyImportedName call (Kbgen.MethodName m) (Kbgen.ImportedName name) (Kbgen.ImportedFromFile f))
+    ]
 getResolvedCallFacts' fqn call = Set.singleton (Kbgen.CallResolvedCtor (Kbgen.CallResolved call (Kbgen.Resolved fqn)))
 
 -- | @kb_field_read_resolved( FieldRead, Fqn )@ -- only for field reads
