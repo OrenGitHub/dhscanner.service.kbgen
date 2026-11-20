@@ -176,8 +176,23 @@ getConstStringsFromValue _ = Set.empty
 getConstStringsFromValue' :: Token.ConstStr -> Set Kbgen.Fact
 getConstStringsFromValue' value = let
     location = Kbgen.ConstStr (Token.constStrLocation value)
-    constString = Kbgen.ConstString location value
+    oneLine = value { Token.constStrValue = escapeLineBreaks (Token.constStrValue value) }
+    constString = Kbgen.ConstString location oneLine
     in Set.singleton (Kbgen.ConstStringCtor constString)
+
+-- | One kb fact = one kb line : a line break inside a string constant
+-- ( a multi line yaml / sql / text block ) becomes the two characters
+-- @\\n@ ( @\\r@ ), so @kb_const_string@ never spans lines. The package's
+-- @prologify@ escapes the backslash, so the atom holds a backslash and
+-- an @n@, not a newline : no predicate matches a line break inside a
+-- string constant, and line based tools ( sort -u, grep, wc -l ) on the
+-- kb see one fact per line.
+escapeLineBreaks :: String -> String
+escapeLineBreaks = concatMap escapeLineBreak
+    where
+        escapeLineBreak '\n' = "\\n"
+        escapeLineBreak '\r' = "\\r"
+        escapeLineBreak c = [ c ]
 
 getConstIntegersRelatedFacts :: Cfg -> Set Kbgen.Fact
 getConstIntegersRelatedFacts = getConstIntegersRelatedFacts' . instructions
