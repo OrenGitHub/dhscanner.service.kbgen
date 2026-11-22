@@ -914,7 +914,13 @@ getFieldReadResolvedFact' callees output
 getFieldReadResolvedFact'' :: Location -> Fqn.Fqn -> Maybe Kbgen.Fact
 getFieldReadResolvedFact'' loc fqn
     | isRootedAtThirdPartyImport fqn = Just (Kbgen.FieldReadResolvedCtor (Kbgen.FieldReadResolved (Kbgen.FieldRead loc) (Kbgen.Resolved fqn)))
-    | otherwise = Nothing
+    | otherwise = getFieldReadOf1stPartyImportedNameFact loc fqn
+
+-- | @Name.f@ with @Name@ imported from a 1st party file ( e.g. php @X::class@ )
+getFieldReadOf1stPartyImportedNameFact :: Location -> Fqn.Fqn -> Maybe Kbgen.Fact
+getFieldReadOf1stPartyImportedNameFact loc (Fqn.FieldedAccess (Fqn.FirstPartyImport (Fqn.FirstPartyImportContent f (Just name))) (Token.FieldName (Token.Named field _))) =
+    Just (Kbgen.FieldReadOf1stPartyImportedNameCtor (Kbgen.FieldReadOf1stPartyImportedName (Kbgen.FieldRead loc) (Kbgen.FieldName field) (Kbgen.ImportedName name) (Kbgen.ImportedFromFile f)))
+getFieldReadOf1stPartyImportedNameFact _ _ = Nothing
 
 isRootedAtThirdPartyImport :: Fqn.Fqn -> Bool
 isRootedAtThirdPartyImport (Fqn.FieldedAccess fqn _) = isRootedAtThirdPartyImport fqn
