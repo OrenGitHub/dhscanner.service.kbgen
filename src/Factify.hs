@@ -862,8 +862,15 @@ getCallsRelatedFacts''' :: Bitcode.CallContent -> [ Set Kbgen.Fact ]
 getCallsRelatedFacts''' call = [
         getArgiForCallFacts call,
         getKeywordArgsForCallFacts call,
-        getResolvedCallFacts call
+        getResolvedCallFacts call,
+        getReturnValueOfCallFacts call
     ]
+
+getReturnValueOfCallFacts :: Bitcode.CallContent -> Set Kbgen.Fact
+getReturnValueOfCallFacts c = let
+    v = Kbgen.ReturnValue (Bitcode.locationVariable (Bitcode.callOutput c))
+    call = Kbgen.Call (Bitcode.callLocation c)
+    in Set.singleton (Kbgen.ReturnValueOfCallCtor (Kbgen.ReturnValueOfCall v call))
 
 getResolvedCallFacts''' :: Kbgen.Call -> Kbgen.MethodName -> Token.ParamName -> Set Kbgen.Fact
 getResolvedCallFacts''' call method p = Set.singleton (Kbgen.CallMethodOfUntypedNamedParamCtor (Kbgen.CallMethodOfUntypedNamedParam call method p))
