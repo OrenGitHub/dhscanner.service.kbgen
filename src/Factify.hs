@@ -893,6 +893,10 @@ getResolvedCallFacts' fqn@(Fqn.FieldedAccess (Fqn.FirstPartyImport (Fqn.FirstPar
         Kbgen.CallResolvedCtor (Kbgen.CallResolved call (Kbgen.Resolved fqn)),
         Kbgen.CallMethodOf1stPartyImportedNameCtor (Kbgen.CallMethodOf1stPartyImportedName call (Kbgen.MethodName m) (Kbgen.ImportedName name) (Kbgen.ImportedFromFile f))
     ]
+getResolvedCallFacts' fqn@(Fqn.FieldedAccess (Fqn.ReturnTypeOf returnValue _) (Token.FieldName (Token.Named m _))) call = Set.fromList [
+        Kbgen.CallResolvedCtor (Kbgen.CallResolved call (Kbgen.Resolved fqn)),
+        Kbgen.CallMethodOfReturnValueCtor (Kbgen.CallMethodOfReturnValue call (Kbgen.MethodName m) (Kbgen.ReturnValue returnValue))
+    ]
 getResolvedCallFacts' fqn call = Set.singleton (Kbgen.CallResolvedCtor (Kbgen.CallResolved call (Kbgen.Resolved fqn)))
 
 -- | @kb_field_read_resolved( FieldRead, Fqn )@ -- only for field reads
@@ -932,6 +936,7 @@ getFieldReadOf1stPartyImportedNameFact _ _ = Nothing
 isRootedAtThirdPartyImport :: Fqn.Fqn -> Bool
 isRootedAtThirdPartyImport (Fqn.FieldedAccess fqn _) = isRootedAtThirdPartyImport fqn
 isRootedAtThirdPartyImport (Fqn.ThirdPartyImport _) = True
+isRootedAtThirdPartyImport (Fqn.ReturnTypeOf _ fqn) = isRootedAtThirdPartyImport fqn
 isRootedAtThirdPartyImport _ = False
 
 getResolvedCallFacts :: Bitcode.CallContent -> Set Kbgen.Fact
