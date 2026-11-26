@@ -37,8 +37,24 @@ factifyScript' s = [
         getConstNullsRelatedFacts (Callable.scriptBody s),
         getGatedReturnFacts (Callable.scriptBody s),
         getComparisonFacts (Callable.scriptBody s),
-        getAssignmentsRelatedFacts (Callable.scriptBody s)
+        getAssignmentsRelatedFacts (Callable.scriptBody s),
+        getDataflowFacts (Callable.scriptBody s),
+        getCalledFromFacts (Kbgen.Callable (scriptLocation s)) (Callable.scriptBody s)
     ]
+
+-- | A script has no source location of its own ( 'Callable.ScriptContent' carries
+-- only its filename ), so it is located at line / col 0 of its file : the same
+-- "not from source" marker the parsers use for synthetic nodes. Its top level
+-- calls are called from it ( kb_called_from ) and its top level dataflow is in
+-- the kb ( kb_dataflow_edge ), as for any other callable.
+scriptLocation :: Callable.ScriptContent -> Location
+scriptLocation s = Location {
+    Location.filename = Callable.filename s,
+    lineStart = 0,
+    lineEnd = 0,
+    colStart = 0,
+    colEnd = 0
+}
 
 factifyLambda :: Callable.LambdaContent -> Set Kbgen.Fact
 factifyLambda l = List.foldl' Set.union Set.empty (factifyLambda' l)
@@ -644,11 +660,9 @@ mkComparisonFact b op = let
 -- 'utils_early_return_authenticating_function_call' in the
 -- queryengine's baked-in utils.pl.
 --
--- Scripts are intentionally excluded : script top-level statements
--- have no enclosing "callable" location ( 'Callable.ScriptContent'
--- carries a 'filename' but no 'Location' ) and the existing
--- factifyScript' pipeline doesn't emit params / return-values facts
--- for the same reason.
+-- A script's top-level statements are called from the script itself,
+-- located at line / col 0 of its file ( 'scriptLocation' ). Scripts
+-- still get no params / return-values facts.
 getCalledFromFacts :: Kbgen.Callable -> Cfg -> Set Kbgen.Fact
 getCalledFromFacts callable = getCalledFromFacts' callable . instructions
 
