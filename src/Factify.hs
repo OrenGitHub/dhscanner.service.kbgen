@@ -39,7 +39,8 @@ factifyScript' s = [
         getComparisonFacts (Callable.scriptBody s),
         getAssignmentsRelatedFacts (Callable.scriptBody s),
         getDataflowFacts (Callable.scriptBody s),
-        getCalledFromFacts (Kbgen.Callable (scriptLocation s)) (Callable.scriptBody s)
+        getCalledFromFacts (Kbgen.Callable (scriptLocation s)) (Callable.scriptBody s),
+        getCalledFromScriptFacts (Callable.filename s) (Callable.scriptBody s)
     ]
 
 -- | A script has no source location of its own ( 'Callable.ScriptContent' carries
@@ -675,6 +676,15 @@ getCalledFromFacts'' callable acc i = Set.union acc (getCalledFromFactFromInstru
 getCalledFromFactFromInstruction :: Kbgen.Callable -> Bitcode.Instruction -> Set Kbgen.Fact
 getCalledFromFactFromInstruction callable (Bitcode.Instruction _ (Bitcode.Call c)) = Set.singleton (mkCalledFromFact callable c)
 getCalledFromFactFromInstruction _ _ = Set.empty
+
+-- | A script's top level calls, with the script named by its file ( kb_called_from_script ) :
+-- what a predicate joins a constant file name on ( a rendered template ).
+getCalledFromScriptFacts :: FilePath -> Cfg -> Set Kbgen.Fact
+getCalledFromScriptFacts f = Foldable.foldl' (\acc i -> Set.union acc (getCalledFromScriptFactFromInstruction f i)) Set.empty . instructions
+
+getCalledFromScriptFactFromInstruction :: FilePath -> Bitcode.Instruction -> Set Kbgen.Fact
+getCalledFromScriptFactFromInstruction f (Bitcode.Instruction _ (Bitcode.Call c)) = Set.singleton (Kbgen.CalledFromScriptCtor (Kbgen.CalledFromScript (Kbgen.Call (Bitcode.callLocation c)) (Kbgen.ScriptFileName f)))
+getCalledFromScriptFactFromInstruction _ _ = Set.empty
 
 mkCalledFromFact :: Kbgen.Callable -> Bitcode.CallContent -> Kbgen.Fact
 mkCalledFromFact callable c = Kbgen.CalledFromCtor (Kbgen.CalledFrom (Kbgen.Call (Bitcode.callLocation c)) callable)
